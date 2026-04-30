@@ -7,7 +7,7 @@ Local image generation and editing using [FLUX.2 Klein](https://huggingface.co/b
 - Python 3.10+
 - GPU recommended: NVIDIA CUDA, or Apple Silicon MPS
 - 16 GB VRAM/RAM for the 4B model; 24 GB for the 9B model
-- Google Colab (T4/L4/A100) is supported via `colab.ipynb`
+- Google Colab (T4/L4/A100) is supported via [`image-gen-edit.ipynb`](image-gen-edit.ipynb)
 
 ## Setup
 
@@ -50,6 +50,21 @@ When no image is attached, by default the UI feeds the previous generated
 output back in as the input image, letting you iterate on a result by chatting.
 Untick the toggle in the composer to disable that and do pure text-to-image
 on every turn.
+
+### Run on Google Colab
+
+No local GPU? Open [`image-gen-edit.ipynb`](image-gen-edit.ipynb) in Google
+Colab and run the cells top to bottom:
+
+1. **Runtime → Change runtime type → GPU** (T4 is sufficient for the 4B model).
+2. The notebook clones this repo, installs dependencies, prompts for your
+   Hugging Face token, and starts the same Flask web UI as `python app.py`.
+3. A public `https://*.trycloudflare.com` URL is printed — click it to open
+   the UI from any browser. Stop the cell to shut the server and tunnel down.
+
+On a T4 the pipeline is loaded directly into VRAM (≈8 GB for 4B); the 9B
+model falls back to sequential CPU offload and is slow on T4 — prefer L4 or
+A100 for 9B.
 
 ### Options
 
