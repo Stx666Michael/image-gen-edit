@@ -55,7 +55,7 @@ ROOT = Path(__file__).resolve().parent
 SESSIONS_DIR = ROOT / "sessions"
 SESSIONS_DIR.mkdir(exist_ok=True)
 
-# One generation at a time — the pipeline isn't thread-safe and MPS memory is
+# One generation at a time — the pipeline isn't thread-safe and GPU memory is
 # tight. Each request waits its turn.
 _gen_lock = threading.Lock()
 

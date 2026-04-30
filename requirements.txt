@@ -1,4 +1,4 @@
-# PyTorch with MPS support (Apple Silicon) — install via pip on macOS
+# PyTorch — supports CUDA (Linux/Windows) and MPS (Apple Silicon/macOS)
 torch>=2.3.0
 torchvision
 torchaudio

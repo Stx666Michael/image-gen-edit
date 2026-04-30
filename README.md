@@ -1,12 +1,13 @@
 # FLUX.2 Klein Image Generation & Editing
 
-Local image generation and editing using [FLUX.2 Klein](https://huggingface.co/black-forest-labs) models on Apple Silicon (MPS).
+Local image generation and editing using [FLUX.2 Klein](https://huggingface.co/black-forest-labs) models. Runs on CUDA (Linux/Windows), Apple Silicon MPS (macOS), or CPU.
 
 ## Requirements
 
-- macOS with Apple Silicon (M1/M2/M3/M4)
 - Python 3.10+
-- 24 GB unified RAM recommended for the 9B model; 16 GB is sufficient for 4B
+- GPU recommended: NVIDIA CUDA, or Apple Silicon MPS
+- 16 GB VRAM/RAM for the 4B model; 24 GB for the 9B model
+- Google Colab (T4/L4/A100) is supported via `colab.ipynb`
 
 ## Setup
 
@@ -103,4 +104,4 @@ export HF_HOME=/path/to/external/drive/hf_cache
 python main.py ...
 ```
 
-Add the `export` line to `~/.zshrc` to make it permanent.
+Add the `export` line to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.) to make it permanent.
