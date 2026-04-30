@@ -25,7 +25,16 @@ MODELS = {
 
 DEFAULTS = {"steps": 4, "guidance": 1.0, "width": 1024, "height": 1024, "seed": 42, "dtype": torch.float16}
 
-DEVICE = "mps"
+
+def _pick_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE = _pick_device()
 
 # Cache a single pipeline instance across calls (UI keeps it warm between
 # messages; CLI uses it once per invocation).
