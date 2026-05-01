@@ -64,31 +64,35 @@ def get_pipeline(model_key: str) -> Flux2KleinPipeline:
                 torch.cuda.empty_cache()
 
             if DEVICE == "cuda":
-                # Use device_map="cuda" so accelerate loads each weight shard
-                # directly onto the GPU and immediately releases the CPU copy.
-                # This keeps system RAM usage to a few hundred MB instead of a
-                # full fp16 copy (~8 GB for 4B), which is what crashed the T4
-                # runtime (Colab caps system RAM at ~12 GB).
+                # Figure out a VRAM budget that leaves room for inference activations.
+                # The 4B pipeline (transformer + text-encoder + VAE) totals ~14 GB in
+                # fp16 — nearly the full T4 VRAM. device_map="cuda" fills VRAM and
+                # leaves nothing for activations → OOM.
                 #
-                # For the 9B model (18 GB weights > T4's 16 GB VRAM) we fall
-                # back to device_map="auto" so accelerate can spill the excess
-                # to CPU RAM — still tight on T4, so an L4/A100 is recommended
-                # for 9B.
-                free, total = torch.cuda.mem_get_info()
-                vram_gb = total / 1e9
-                model_gb = 18.0 if "9b" in model_key.lower() else 8.0
-                dmap = "cuda" if vram_gb >= model_gb + 1.0 else "auto"
+                # device_map="auto" with max_memory uses accelerate's meta-device
+                # loader: each weight shard goes directly from disk to its target
+                # device (no staging the full model in CPU RAM). Components that don't
+                # fit in the VRAM budget are placed on CPU and moved to GPU on-demand
+                # via hooks during inference.
+                #
+                # We reserve ~6 GB of VRAM for inference activations; the rest is
+                # available for model weights. CPU cap of 11 GB stays under Colab's
+                # 12 GB system RAM limit.
+                _, total_vram = torch.cuda.mem_get_info()
+                vram_gb = total_vram / 1e9
+                model_vram_budget = max(4.0, vram_gb - 6.0)  # e.g. ~8.5 GB on T4
+
                 pipe = Flux2KleinPipeline.from_pretrained(
                     repo_id,
                     torch_dtype=DEFAULTS["dtype"],
                     token=get_token(),
-                    device_map=dmap,
+                    device_map="auto",
+                    max_memory={0: f"{model_vram_budget:.0f}GiB", "cpu": "11GiB"},
                 )
-                # Attention slicing computes attention one head at a time,
-                # cutting peak activation VRAM by ~40% at modest speed cost.
+                # Attention slicing cuts peak activation VRAM by ~40%.
                 if hasattr(pipe, "enable_attention_slicing"):
                     pipe.enable_attention_slicing(1)
-                # Slicing/tiling keeps VAE decode VRAM manageable at 1024x1024.
+                # VAE slicing/tiling keeps decode memory manageable.
                 if hasattr(pipe, "vae") and pipe.vae is not None:
                     if hasattr(pipe.vae, "enable_slicing"):
                         pipe.vae.enable_slicing()
