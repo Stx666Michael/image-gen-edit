@@ -10,9 +10,20 @@ Local image generation and editing using multiple SOTA models. Runs on CUDA (Lin
 - Google Colab (T4/L4/A100) is supported via [`colab.ipynb`](colab.ipynb)
 
 ## Models
-- [FLUX.2-klein-4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B)
-- [FLUX.2-klein-9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B)
-- [Stable Diffusion 3.5 Medium](https://huggingface.co/stabilityai/stable-diffusion-3.5-medium)
+- [FLUX.2-klein-4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B) (generation/editing)
+- [FLUX.2-klein-9B](https://huggingface.co/black-forest-labs/FLUX.2-klein-9B) (generation/editing)
+- [Stable Diffusion 3.5 Medium](https://huggingface.co/stabilityai/stable-diffusion-3.5-medium) (generation only)
+
+### Small Decoder (Klein models only)
+
+Klein models optionally support the [FLUX.2-small-decoder](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder), a distilled VAE decoder that is a drop-in replacement for the standard FLUX.2 decoder:
+
+- ~1.4× faster decoding
+- ~1.4× less VRAM at decode time (enables higher resolutions without running out of memory)
+- ~28 M decoder parameters vs ~50 M in the full decoder
+- Minimal to zero quality loss
+
+Enable it with `--small-decoder` on the CLI, or tick the **Small decoder** checkbox in the web UI config panel (visible only when a Klein model is selected).
 
 ## Setup
 
@@ -77,6 +88,7 @@ Colab and run the cells top to bottom:
 | `--guidance` | `1.0` | Guidance scale |
 | `--seed` | `42` | Random seed for reproducibility |
 | `--output` | `<model>.png` | Output file path |
+| `--small-decoder` | *(off)* | Use [FLUX.2-small-decoder](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder) for Klein models (~1.4× faster decode, ~1.4× lower VRAM) |
 
 ### Text-to-Image
 
@@ -86,6 +98,10 @@ python main.py --model flux2-klein-4b --size 512 --output output/result.png
 
 # High-res with 9B model
 python main.py --model flux2-klein-9b --size 1024 --output output/klein9b.png
+
+# Use small decoder for faster decode and lower VRAM (Klein models only)
+python main.py --model flux2-klein-4b --small-decoder --output output/result_small_dec.png
+python main.py --model flux2-klein-9b --small-decoder --size 1024 --output output/klein9b_small_dec.png
 
 # Custom prompt
 python main.py --model flux2-klein-4b --prompt "A futuristic city at sunset, cinematic lighting"

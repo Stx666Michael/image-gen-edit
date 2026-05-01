@@ -112,6 +112,7 @@ def _normalize_config(cfg: Optional[dict]) -> dict:
     if model not in MODELS:
         abort(400, f"unknown model: {model}")
     model_defaults = get_model_defaults(model)
+    supports_small_decoder = MODELS[model].get("supports_small_decoder", False)
     return {
         "model": model,
         "steps": int(cfg.get("steps") or model_defaults["steps"]),
@@ -119,6 +120,7 @@ def _normalize_config(cfg: Optional[dict]) -> dict:
         "seed": int(cfg.get("seed") if cfg.get("seed") is not None else model_defaults["seed"]),
         "width": int(cfg.get("width") or model_defaults["width"]),
         "height": int(cfg.get("height") or model_defaults["height"]),
+        "use_small_decoder": bool(cfg.get("use_small_decoder", False)) if supports_small_decoder else False,
     }
 
 
@@ -297,6 +299,7 @@ def api_send_message(sid):
                 seed=cfg["seed"],
                 width=cfg["width"],
                 height=cfg["height"],
+                use_small_decoder=cfg.get("use_small_decoder", False),
                 on_step=_on_step,
             )
     except Exception as e:  # surface failure to the UI

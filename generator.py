@@ -9,10 +9,14 @@ import threading
 from typing import Iterable, Optional
 
 import torch
-from diffusers import Flux2KleinPipeline, StableDiffusion3Pipeline
+from diffusers import AutoencoderKLFlux2, Flux2KleinPipeline, StableDiffusion3Pipeline
 from diffusers.utils import load_image
 from huggingface_hub import get_token
 from PIL import Image
+
+# Repo ID for the distilled small VAE decoder (drop-in for FLUX.2 Klein models).
+# ~1.4x faster decode, ~1.4x less VRAM, minimal quality loss.
+SMALL_DECODER_REPO = "black-forest-labs/FLUX.2-small-decoder"
 
 # ---------------------------------------------------------------------------
 # Available models — each with its pipeline class, dtype, and repo ID.
@@ -25,18 +29,21 @@ MODELS = {
         "pipeline_cls": Flux2KleinPipeline,
         "dtype": torch.float16,
         "defaults": {"steps": 4, "guidance": 1.0},
+        "supports_small_decoder": True,
     },
     "flux2-klein-9b": {
         "repo": "black-forest-labs/FLUX.2-klein-9B",
         "pipeline_cls": Flux2KleinPipeline,
         "dtype": torch.float16,
         "defaults": {"steps": 4, "guidance": 1.0},
+        "supports_small_decoder": True,
     },
     "sd-3.5-medium": {
         "repo": "stabilityai/stable-diffusion-3.5-medium",
         "pipeline_cls": StableDiffusion3Pipeline,
         "dtype": torch.bfloat16,
         "defaults": {"steps": 40, "guidance": 4.5},
+        "supports_small_decoder": False,
     },
 }
 
@@ -72,27 +79,50 @@ def get_model_defaults(model_key: str) -> dict:
 # messages; CLI uses it once per invocation).
 _pipe = None
 _pipe_repo: Optional[str] = None
+_pipe_use_small_decoder: bool = False
 _pipe_lock = threading.Lock()
 
 
-def get_pipeline(model_key: str):
-    """Return a cached pipeline for ``model_key``, loading/swapping if needed."""
-    global _pipe, _pipe_repo
+def get_pipeline(model_key: str, use_small_decoder: bool = False):
+    """Return a cached pipeline for ``model_key``, loading/swapping if needed.
+
+    When ``use_small_decoder=True`` and the model supports it, the pipeline is
+    built with the distilled ``FLUX.2-small-decoder`` VAE instead of the
+    default one, giving ~1.4x faster decoding and ~1.4x lower VRAM usage.
+    """
+    global _pipe, _pipe_repo, _pipe_use_small_decoder
     if model_key not in MODELS:
         raise ValueError(f"Unknown model: {model_key}. Choices: {list(MODELS)}")
     model_cfg = MODELS[model_key]
     repo_id = model_cfg["repo"]
+    # small decoder is only applicable to Klein models
+    actual_small_decoder = use_small_decoder and model_cfg.get("supports_small_decoder", False)
     with _pipe_lock:
-        if _pipe is None or _pipe_repo != repo_id:
+        if (
+            _pipe is None
+            or _pipe_repo != repo_id
+            or _pipe_use_small_decoder != actual_small_decoder
+        ):
             # Drop any prior pipeline before loading a new one.
             _pipe = None
             _pipe_repo = None
-            pipe = model_cfg["pipeline_cls"].from_pretrained(
-                repo_id, torch_dtype=model_cfg["dtype"], token=get_token()
-            )
+            if actual_small_decoder:
+                vae = AutoencoderKLFlux2.from_pretrained(
+                    SMALL_DECODER_REPO,
+                    torch_dtype=model_cfg["dtype"],
+                    token=get_token(),
+                )
+                pipe = model_cfg["pipeline_cls"].from_pretrained(
+                    repo_id, vae=vae, torch_dtype=model_cfg["dtype"], token=get_token()
+                )
+            else:
+                pipe = model_cfg["pipeline_cls"].from_pretrained(
+                    repo_id, torch_dtype=model_cfg["dtype"], token=get_token()
+                )
             pipe.enable_model_cpu_offload()
             _pipe = pipe
             _pipe_repo = repo_id
+            _pipe_use_small_decoder = actual_small_decoder
         return _pipe
 
 
@@ -118,6 +148,7 @@ def generate(
     seed: int = GLOBAL_DEFAULTS["seed"],
     width: int = GLOBAL_DEFAULTS["width"],
     height: int = GLOBAL_DEFAULTS["height"],
+    use_small_decoder: bool = False,
     on_step=None,
 ):
     """Run the pipeline and return the first generated PIL image.
@@ -143,7 +174,7 @@ def generate(
             on_step(step_index + 1, steps)
         return callback_kwargs
 
-    pipe = get_pipeline(model)
+    pipe = get_pipeline(model, use_small_decoder=use_small_decoder)
     pipeline_cls = MODELS[model]["pipeline_cls"]
     call_kwargs: dict = dict(
         prompt=prompt,

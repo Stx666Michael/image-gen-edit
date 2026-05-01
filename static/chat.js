@@ -81,6 +81,7 @@ async function createSession() {
         model: modelKey,
         steps: defaults.steps, guidance: defaults.guidance,
         seed: defaults.seed, width: defaults.width, height: defaults.height,
+        use_small_decoder: isKleinModel(modelKey) && $("cfg-small-decoder").checked,
       },
     }),
   });
@@ -99,12 +100,15 @@ async function selectSession(id) {
 }
 
 function loadConfigUI(cfg) {
-  $("cfg-model").value = cfg.model;
-  $("cfg-steps").value = cfg.steps;
-  $("cfg-guidance").value = cfg.guidance;
-  $("cfg-seed").value = cfg.seed;
-  $("cfg-width").value = cfg.width;
-  $("cfg-height").value = cfg.height;
+  $('cfg-model').value = cfg.model;
+  $('cfg-steps').value = cfg.steps;
+  $('cfg-guidance').value = cfg.guidance;
+  $('cfg-seed').value = cfg.seed;
+  $('cfg-width').value = cfg.width;
+  $('cfg-height').value = cfg.height;
+  const supportsSmallDecoder = isKleinModel(cfg.model);
+  $('small-decoder-label').style.display = supportsSmallDecoder ? '' : 'none';
+  $('cfg-small-decoder').checked = supportsSmallDecoder && !!cfg.use_small_decoder;
 }
 
 function escapeHtml(s) {
@@ -180,7 +184,8 @@ function renderMessage(m) {
       el.innerHTML = `<div class="bubble err">⚠ ${escapeHtml(m.error)}</div>`;
     } else {
       const cfg = m.config_snapshot || {};
-      const meta = `${cfg.model || ""} · steps ${cfg.steps} · g ${cfg.guidance} · seed ${cfg.seed} · ${cfg.width}×${cfg.height}${m.elapsed_s ? ` · ${m.elapsed_s}s` : ""}` ;
+      const smallDecInfo = cfg.use_small_decoder ? " · small decoder" : "";
+      const meta = `${cfg.model || ""} · steps ${cfg.steps} · g ${cfg.guidance} · seed ${cfg.seed} · ${cfg.width}×${cfg.height}${smallDecInfo}${m.elapsed_s ? ` · ${m.elapsed_s}s` : ""}` ;
       el.innerHTML = `
         <div class="bubble">
           <img src="/api/sessions/${sid}/files/${encodeURIComponent(m.image)}" />
@@ -293,6 +298,7 @@ async function saveConfig() {
     seed: parseInt($("cfg-seed").value, 10),
     width: parseInt($("cfg-width").value, 10),
     height: parseInt($("cfg-height").value, 10),
+    use_small_decoder: isKleinModel($("cfg-model").value) && $("cfg-small-decoder").checked,
   };
   const name = $("session-name").value.trim() || state.current.name;
   state.current = await api(`/api/sessions/${state.current.id}`, {
@@ -304,15 +310,19 @@ async function saveConfig() {
 }
 
 // --- wire up UI ---
-$("new-session-btn").addEventListener("click", createSession);
-$("config-toggle").addEventListener("click", () => $("config-panel").classList.toggle("open"));
-$("attach-btn").addEventListener("click", () => $("file-input").click());
-$("file-input").addEventListener("change", (e) => {
+function isKleinModel(modelKey) {
+  return modelKey && modelKey.startsWith('flux2-klein');
+}
+
+$('new-session-btn').addEventListener('click', createSession);
+$('config-toggle').addEventListener('click', () => $('config-panel').classList.toggle('open'));
+$('attach-btn').addEventListener('click', () => $('file-input').click());
+$('file-input').addEventListener('change', (e) => {
   addPendingFiles(e.target.files);
-  e.target.value = "";
+  e.target.value = '';
 });
-$("send-btn").addEventListener("click", sendMessage);
-$("prompt-input").addEventListener("keydown", (e) => {
+$('send-btn').addEventListener('click', sendMessage);
+$('prompt-input').addEventListener('keydown', (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
@@ -332,11 +342,16 @@ $("cfg-model").addEventListener("change", async (e) => {
   const defaults = await getModelDefaults(e.target.value);
   $("cfg-steps").value = defaults.steps;
   $("cfg-guidance").value = defaults.guidance;
+  // Show/hide the small decoder option based on whether the new model supports it.
+  const klein = isKleinModel(e.target.value);
+  $("small-decoder-label").style.display = klein ? '' : 'none';
+  if (!klein) $("cfg-small-decoder").checked = false;
   await saveConfig();
 });
 for (const id of ["cfg-steps", "cfg-guidance", "cfg-seed", "cfg-width", "cfg-height"]) {
   $(id).addEventListener("change", saveConfig);
 }
+$("cfg-small-decoder").addEventListener("change", saveConfig);
 
 // --- theme ---
 function applyTheme(theme) {
@@ -373,6 +388,7 @@ $("theme-toggle").addEventListener("click", () => {
       model: defaultModel,
       steps: defaults.steps, guidance: defaults.guidance,
       seed: defaults.seed, width: defaults.width, height: defaults.height,
+      use_small_decoder: false,
     });
   }
 })();
