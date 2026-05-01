@@ -5,6 +5,7 @@ is loaded the same way in both contexts.
 """
 from __future__ import annotations
 
+import gc
 import threading
 from typing import Iterable, Optional
 
@@ -51,46 +52,50 @@ def get_pipeline(model_key: str) -> Flux2KleinPipeline:
     repo_id = MODELS[model_key]["repo"]
     with _pipe_lock:
         if _pipe is None or _pipe_repo != repo_id:
-            # Drop any prior pipeline before loading a new one. Free GPU
-            # memory aggressively so the next load doesn't OOM.
+            # Drop any prior pipeline and free memory before loading a new one.
             _pipe = None
             _pipe_repo = None
+            gc.collect()
             if DEVICE == "cuda":
                 torch.cuda.empty_cache()
 
-            pipe = Flux2KleinPipeline.from_pretrained(
-                repo_id,
-                torch_dtype=DEFAULTS["dtype"],
-                token=get_token(),
-                low_cpu_mem_usage=True,
-            )
-
             if DEVICE == "cuda":
-                # On CUDA we have to choose between two memory pressures:
-                #   * model_cpu_offload    — keeps a full fp16 copy in system RAM
-                #     (~8 GB for 4B, ~18 GB for 9B). Crashes Colab's 12 GB RAM.
-                #   * sequential_cpu_offload — streams layer-by-layer, low RAM
-                #     and low VRAM, but slow.
-                #   * .to("cuda")          — pure VRAM, fastest, fits 4B on T4.
-                # Pick based on available VRAM. T4 = 16 GB → 4B fits, 9B needs
-                # sequential offload.
+                # Use device_map="cuda" so accelerate loads each weight shard
+                # directly onto the GPU and immediately releases the CPU copy.
+                # This keeps system RAM usage to a few hundred MB instead of a
+                # full fp16 copy (~8 GB for 4B), which is what crashed the T4
+                # runtime (Colab caps system RAM at ~12 GB).
+                #
+                # For the 9B model (18 GB weights > T4's 16 GB VRAM) we fall
+                # back to device_map="auto" so accelerate can spill the excess
+                # to CPU RAM — still tight on T4, so an L4/A100 is recommended
+                # for 9B.
                 free, total = torch.cuda.mem_get_info()
                 vram_gb = total / 1e9
                 model_gb = 18.0 if "9b" in model_key.lower() else 8.0
-                if vram_gb >= model_gb + 2.0:
-                    pipe = pipe.to("cuda")
-                else:
-                    pipe.enable_sequential_cpu_offload()
-                # Decoding the latents at 1024x1024 spikes VRAM; slicing/tiling
-                # keeps it modest on T4-class GPUs.
+                dmap = "cuda" if vram_gb >= model_gb + 1.0 else "auto"
+                pipe = Flux2KleinPipeline.from_pretrained(
+                    repo_id,
+                    torch_dtype=DEFAULTS["dtype"],
+                    token=get_token(),
+                    device_map=dmap,
+                )
+                # Slicing/tiling keeps VAE decode VRAM manageable at 1024x1024.
                 if hasattr(pipe, "vae") and pipe.vae is not None:
                     if hasattr(pipe.vae, "enable_slicing"):
                         pipe.vae.enable_slicing()
                     if hasattr(pipe.vae, "enable_tiling"):
                         pipe.vae.enable_tiling()
             else:
-                # MPS / CPU: model_cpu_offload works well with unified memory
-                # and keeps peak usage manageable on 16 GB Macs.
+                # MPS / CPU: load to CPU then offload to MPS on demand.
+                # device_map is not reliably supported on MPS, so we keep the
+                # original enable_model_cpu_offload() path.
+                pipe = Flux2KleinPipeline.from_pretrained(
+                    repo_id,
+                    torch_dtype=DEFAULTS["dtype"],
+                    token=get_token(),
+                    low_cpu_mem_usage=True,
+                )
                 pipe.enable_model_cpu_offload()
 
             _pipe = pipe
@@ -144,6 +149,9 @@ def generate(
 
     pipe = get_pipeline(model)
     with _pipe_lock:
+        # Use a CPU generator — when device_map is active diffusers places
+        # tensors itself and a device-specific generator can cause a mismatch.
+        generator = torch.Generator(device="cpu").manual_seed(seed)
         result = pipe(
             prompt=prompt,
             image=input_images,
@@ -151,7 +159,7 @@ def generate(
             width=width,
             guidance_scale=guidance,
             num_inference_steps=steps,
-            generator=torch.Generator(device=DEVICE).manual_seed(seed),
+            generator=generator,
             callback_on_step_end=_step_callback,
         )
     return result.images[0]
