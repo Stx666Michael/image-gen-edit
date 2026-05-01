@@ -6,10 +6,14 @@ is loaded the same way in both contexts.
 from __future__ import annotations
 
 import gc
+import os
 import threading
 from typing import Iterable, Optional
 
 import torch
+
+# Reduce CUDA allocator fragmentation — must be set before any CUDA allocation.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 from diffusers import Flux2KleinPipeline
 from diffusers.utils import load_image
 from huggingface_hub import get_token
@@ -80,6 +84,10 @@ def get_pipeline(model_key: str) -> Flux2KleinPipeline:
                     token=get_token(),
                     device_map=dmap,
                 )
+                # Attention slicing computes attention one head at a time,
+                # cutting peak activation VRAM by ~40% at modest speed cost.
+                if hasattr(pipe, "enable_attention_slicing"):
+                    pipe.enable_attention_slicing(1)
                 # Slicing/tiling keeps VAE decode VRAM manageable at 1024x1024.
                 if hasattr(pipe, "vae") and pipe.vae is not None:
                     if hasattr(pipe.vae, "enable_slicing"):
