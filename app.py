@@ -1,4 +1,4 @@
-"""Web UI for FLUX.2 Klein image generation.
+"""Web UI for image generation.
 
 A small Flask app that exposes a chat-like interface with multiple sessions.
 Each session keeps its own configuration (model / steps / guidance / seed /
@@ -14,7 +14,6 @@ Run with::
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import logging
 import threading
@@ -34,7 +33,7 @@ from flask import (
     send_from_directory,
 )
 
-from generator import DEFAULTS, MODELS, generate
+from generator import MODELS, generate, get_model_defaults
 
 # Suppress Werkzeug access-log noise for the high-frequency progress endpoint.
 class _NoProgressLog(logging.Filter):
@@ -112,13 +111,14 @@ def _normalize_config(cfg: Optional[dict]) -> dict:
     model = cfg.get("model", "flux2-klein-4b")
     if model not in MODELS:
         abort(400, f"unknown model: {model}")
+    model_defaults = get_model_defaults(model)
     return {
         "model": model,
-        "steps": int(cfg.get("steps") or DEFAULTS["steps"]),
-        "guidance": float(cfg.get("guidance") or DEFAULTS["guidance"]),
-        "seed": int(cfg.get("seed") if cfg.get("seed") is not None else DEFAULTS["seed"]),
-        "width": int(cfg.get("width") or DEFAULTS["width"]),
-        "height": int(cfg.get("height") or DEFAULTS["height"]),
+        "steps": int(cfg.get("steps") or model_defaults["steps"]),
+        "guidance": float(cfg.get("guidance") or model_defaults["guidance"]),
+        "seed": int(cfg.get("seed") if cfg.get("seed") is not None else model_defaults["seed"]),
+        "width": int(cfg.get("width") or model_defaults["width"]),
+        "height": int(cfg.get("height") or model_defaults["height"]),
     }
 
 
@@ -156,7 +156,8 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB upload cap
 
 @app.route("/")
 def index():
-    ui_defaults = {k: v for k, v in DEFAULTS.items() if k != "dtype"}
+    model_defaults = get_model_defaults("flux2-klein-4b")
+    ui_defaults = {k: v for k, v in model_defaults.items() if k != "dtype"}
     return render_template("index.html", models=list(MODELS.keys()), defaults=ui_defaults)
 
 
@@ -345,12 +346,15 @@ def api_progress(sid):
 def api_models():
     return jsonify({
         "models": list(MODELS.keys()),
-        "defaults": {k: v for k, v in DEFAULTS.items() if k != "dtype"},
+        "model_defaults": {
+            model: {k: v for k, v in get_model_defaults(model).items() if k != "dtype"}
+            for model in MODELS.keys()
+        },
     })
 
 
 def main():
-    parser = argparse.ArgumentParser(description="FLUX.2 Klein chat UI")
+    parser = argparse.ArgumentParser(description="Multi-model image generation chat UI")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")

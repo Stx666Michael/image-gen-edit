@@ -1,4 +1,5 @@
 // DEFAULTS is injected by the template as window.DEFAULTS before this script loads.
+let modelDefaults = {}; // populated from API
 const state = {
   sessions: [],
   current: null,    // full session object
@@ -55,16 +56,31 @@ function renderSessionList() {
   }
 }
 
+async function getModelDefaults(modelKey) {
+  if (modelDefaults[modelKey]) {
+    return modelDefaults[modelKey];
+  }
+  try {
+    const data = await api("/api/models");
+    modelDefaults = data.model_defaults || {};
+    return modelDefaults[modelKey] || DEFAULTS;
+  } catch {
+    return DEFAULTS;
+  }
+}
+
 async function createSession() {
+  const modelKey = $("cfg-model").value || "flux2-klein-4b";
+  const defaults = await getModelDefaults(modelKey);
   const data = await api("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: `Session ${new Date().toLocaleString()}`,
       config: {
-        model: $("cfg-model").value || "flux2-klein-4b",
-        steps: DEFAULTS.steps, guidance: DEFAULTS.guidance,
-        seed: DEFAULTS.seed, width: DEFAULTS.width, height: DEFAULTS.height,
+        model: modelKey,
+        steps: defaults.steps, guidance: defaults.guidance,
+        seed: defaults.seed, width: defaults.width, height: defaults.height,
       },
     }),
   });
@@ -312,7 +328,13 @@ $("prompt-input").addEventListener("input", (e) => {
   e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
 });
 $("session-name").addEventListener("change", saveConfig);
-for (const id of ["cfg-model", "cfg-steps", "cfg-guidance", "cfg-seed", "cfg-width", "cfg-height"]) {
+$("cfg-model").addEventListener("change", async (e) => {
+  const defaults = await getModelDefaults(e.target.value);
+  $("cfg-steps").value = defaults.steps;
+  $("cfg-guidance").value = defaults.guidance;
+  await saveConfig();
+});
+for (const id of ["cfg-steps", "cfg-guidance", "cfg-seed", "cfg-width", "cfg-height"]) {
   $(id).addEventListener("change", saveConfig);
 }
 
@@ -333,14 +355,24 @@ $("theme-toggle").addEventListener("click", () => {
 });
 
 (async () => {
+  // Fetch model defaults from API for later use
+  try {
+    const data = await api("/api/models");
+    modelDefaults = data.model_defaults || {};
+  } catch (e) {
+    console.warn("Failed to fetch model defaults:", e);
+  }
+  
   await loadSessions();
   if (state.sessions.length) {
     await selectSession(state.sessions[0].id);
   } else {
+    const defaultModel = "flux2-klein-4b";
+    const defaults = modelDefaults[defaultModel] || DEFAULTS;
     loadConfigUI({
-      model: "flux2-klein-4b",
-      steps: DEFAULTS.steps, guidance: DEFAULTS.guidance,
-      seed: DEFAULTS.seed, width: DEFAULTS.width, height: DEFAULTS.height,
+      model: defaultModel,
+      steps: defaults.steps, guidance: defaults.guidance,
+      seed: defaults.seed, width: defaults.width, height: defaults.height,
     });
   }
 })();

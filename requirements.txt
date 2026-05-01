@@ -9,9 +9,6 @@ transformers>=4.40.0
 accelerate>=0.30.0
 huggingface_hub>=0.23.0
 
-# Quantization (CUDA only) — enables flux2-klein-4b-nf4 / flux2-klein-4b-int8
-bitsandbytes>=0.43.0
-
 # Runtime
 requests
 Pillow
